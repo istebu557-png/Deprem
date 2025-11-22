@@ -19,7 +19,8 @@ const state = {
     mouseStart: null,
     tempBody: null,
     zoom: 1,
-    pan: { x: 0, y: 0 }
+    pan: { x: 0, y: 0 },
+    viewMode: 'side' // side, top
 };
 
 // Material Properties (Simplified)
@@ -55,8 +56,42 @@ const ground = Bodies.rectangle(
     container.clientHeight - 20,
     container.clientWidth * 2,
     40,
-    { isStatic: true, render: { fillStyle: '#2c3e50' }, label: 'ground' }
+    {
+        isStatic: true,
+        render: {
+            fillStyle: '#2c3e50',
+            // Add a pattern/texture effect via custom render logic if needed, or just let it be.
+            // We will rely on objects moving relative to background for now,
+            // but let's make it striped to see movement better.
+            sprite: {
+                texture: '' // We'll stick to fillStyle for simplicity but maybe update it in loop
+            }
+        },
+        label: 'ground'
+    }
 );
+
+// Custom ground rendering to show shaking
+Events.on(render, 'afterRender', function() {
+    const context = render.context;
+    const body = ground;
+    const pos = body.position;
+    const width = 2000; // Approximate large width
+    const height = 40;
+
+    context.save();
+    context.translate(pos.x, pos.y);
+    context.rotate(body.angle);
+
+    // Draw stripes on ground
+    context.fillStyle = '#34495e';
+    for(let i = -width/2; i < width/2; i+=50) {
+        context.fillRect(i, -height/2, 20, height);
+    }
+
+    context.restore();
+});
+
 Composite.add(world, ground);
 
 // Mouse Interaction for Camera/Dragging (restricted when editing)
@@ -73,6 +108,33 @@ mouseConstraint.collisionFilter.mask = 0;
 Composite.add(world, mouseConstraint);
 render.mouse = mouse;
 
+// Grid Rendering
+const GRID_SIZE = 40; // 10cm equivalent (approx 40px for visualization)
+
+Events.on(render, 'beforeRender', function() {
+    const context = render.context;
+    const width = render.canvas.width;
+    const height = render.canvas.height;
+
+    context.beginPath();
+    context.strokeStyle = '#ccc';
+    context.lineWidth = 1;
+
+    // Draw vertical lines
+    for (let x = 0; x < width; x += GRID_SIZE) {
+        context.moveTo(x, 0);
+        context.lineTo(x, height);
+    }
+
+    // Draw horizontal lines
+    for (let y = 0; y < height; y += GRID_SIZE) {
+        context.moveTo(0, y);
+        context.lineTo(width, y);
+    }
+
+    context.stroke();
+});
+
 // Start Engine
 Render.run(render);
 const runner = Runner.create();
@@ -86,6 +148,25 @@ document.getElementById('btn-delete').addEventListener('click', () => setMode('d
 document.getElementById('material-type').addEventListener('change', (e) => state.selectedMaterial = e.target.value);
 document.getElementById('btn-start').addEventListener('click', startSimulation);
 document.getElementById('btn-reset').addEventListener('click', resetSimulation);
+document.getElementById('btn-view-mode').addEventListener('click', toggleViewMode);
+
+function toggleViewMode() {
+    if (state.viewMode === 'side') {
+        state.viewMode = 'top';
+        document.getElementById('btn-view-mode').textContent = 'Görünüm: Kuş Bakışı';
+        engine.gravity.y = 0; // No gravity in top view
+        // In top view, maybe we hide the ground or make it look like a floor?
+        ground.render.visible = false;
+    } else {
+        state.viewMode = 'side';
+        document.getElementById('btn-view-mode').textContent = 'Görünüm: Yandan';
+        // Gravity is only enabled during simulation in side view
+        if (state.isSimulating) {
+            engine.gravity.y = 1;
+        }
+        ground.render.visible = true;
+    }
+}
 
 // Sliders
 ['magnitude', 'depth', 'duration'].forEach(id => {
@@ -124,12 +205,8 @@ Events.on(render, 'afterRender', function() {
     }
 });
 
-render.canvas.addEventListener('mousedown', (e) => {
+function handleInputStart(x, y) {
     if (state.isSimulating) return;
-
-    const rect = render.canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
 
     if (state.mode === 'delete') {
         handleDelete(x, y);
@@ -138,32 +215,62 @@ render.canvas.addEventListener('mousedown', (e) => {
     } else {
         startPoint = { x, y };
     }
-});
+}
 
-render.canvas.addEventListener('mousemove', (e) => {
+function handleInputMove(x, y) {
     if (state.isSimulating || !startPoint) return;
+    currentPoint = { x, y };
+}
 
-    const rect = render.canvas.getBoundingClientRect();
-    const currentX = e.clientX - rect.left;
-    const currentY = e.clientY - rect.top;
-
-    currentPoint = { x: currentX, y: currentY };
-});
-
-render.canvas.addEventListener('mouseup', (e) => {
+function handleInputEnd(x, y) {
     if (state.isSimulating || !startPoint) return;
-
-    const rect = render.canvas.getBoundingClientRect();
-    const endX = e.clientX - rect.left;
-    const endY = e.clientY - rect.top;
 
     if (state.mode === 'beam' || state.mode === 'column') {
-        createStructuralElement(startPoint.x, startPoint.y, endX, endY, state.mode);
+        createStructuralElement(startPoint.x, startPoint.y, x, y, state.mode);
     }
 
     startPoint = null;
     currentPoint = null;
+}
+
+render.canvas.addEventListener('mousedown', (e) => {
+    const rect = render.canvas.getBoundingClientRect();
+    handleInputStart(e.clientX - rect.left, e.clientY - rect.top);
 });
+
+render.canvas.addEventListener('mousemove', (e) => {
+    const rect = render.canvas.getBoundingClientRect();
+    handleInputMove(e.clientX - rect.left, e.clientY - rect.top);
+});
+
+render.canvas.addEventListener('mouseup', (e) => {
+    const rect = render.canvas.getBoundingClientRect();
+    handleInputEnd(e.clientX - rect.left, e.clientY - rect.top);
+});
+
+// Touch support
+render.canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    const rect = render.canvas.getBoundingClientRect();
+    const touch = e.touches[0];
+    handleInputStart(touch.clientX - rect.left, touch.clientY - rect.top);
+}, { passive: false });
+
+render.canvas.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    const rect = render.canvas.getBoundingClientRect();
+    const touch = e.touches[0];
+    handleInputMove(touch.clientX - rect.left, touch.clientY - rect.top);
+}, { passive: false });
+
+render.canvas.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    // For touchend, we might not have a touch object if all fingers lifted.
+    // We should use the last known position or the changedTouches.
+    const rect = render.canvas.getBoundingClientRect();
+    const touch = e.changedTouches[0];
+    handleInputEnd(touch.clientX - rect.left, touch.clientY - rect.top);
+}, { passive: false });
 
 function createStructuralElement(x1, y1, x2, y2, type) {
     const length = Math.hypot(x2 - x1, y2 - y1);
@@ -333,7 +440,11 @@ Events.on(engine, 'beforeUpdate', (event) => {
         return;
     }
 
-    engine.gravity.y = 1;
+    if (state.viewMode === 'side') {
+        engine.gravity.y = 1;
+    } else {
+        engine.gravity.y = 0; // Top view has no vertical gravity
+    }
 
     const magnitude = parseFloat(document.getElementById('magnitude').value);
     const depth = parseFloat(document.getElementById('depth').value);
