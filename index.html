@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deprem Simülasyonu</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="app">
+        <div id="controls">
+            <h2>Kontrol Paneli</h2>
+
+            <div class="control-group">
+                <h3>Yapı Elemanları</h3>
+                <button id="btn-beam" class="tool-btn active">Kiriş (Yatay)</button>
+                <button id="btn-column" class="tool-btn">Kolon (Dikey)</button>
+                <button id="btn-joint" class="tool-btn">Bağlantı Noktası</button>
+                <button id="btn-delete" class="tool-btn" style="background-color: #ffcccc;">Sil</button>
+            </div>
+
+            <div class="control-group">
+                <h3>Özellikler</h3>
+                <label for="material-type">Malzeme:</label>
+                <select id="material-type">
+                    <option value="concrete">Beton</option>
+                    <option value="steel">Çelik</option>
+                    <option value="wood">Ahşap</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <h3>Deprem Ayarları</h3>
+                <label for="magnitude">Büyüklük (Magnitude): <span id="mag-val">5.0</span></label>
+                <input type="range" id="magnitude" min="1" max="10" step="0.1" value="5.0">
+
+                <label for="depth">Derinlik (km): <span id="depth-val">10</span></label>
+                <input type="range" id="depth" min="1" max="100" value="10">
+
+                <label for="duration">Süre (sn): <span id="dur-val">10</span></label>
+                <input type="range" id="duration" min="1" max="30" value="10">
+            </div>
+
+            <div class="control-group">
+                <button id="btn-start" class="action-btn">Simülasyonu Başlat (Test Et)</button>
+                <button id="btn-reset" class="action-btn secondary">Sıfırla</button>
+            </div>
+
+            <div id="status">
+                Durum: Düzenleme Modu
+            </div>
+        </div>
+        <div id="canvas-container"></div>
+    </div>
+    <script src="lib/matter.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
