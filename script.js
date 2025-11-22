@@ -25,9 +25,9 @@ const state = {
 
 // Material Properties (Simplified)
 const MATERIALS = {
-    concrete: { density: 2.4, friction: 0.5, color: '#95a5a6', strength: 1000 },
-    steel: { density: 7.8, friction: 0.3, color: '#34495e', strength: 3000 },
-    wood: { density: 0.6, friction: 0.7, color: '#d35400', strength: 500 }
+    concrete: { density: 2.4, friction: 0.5, color: '#95a5a6', strength: 2000, stiffness: 100000 },
+    steel: { density: 7.8, friction: 0.3, color: '#34495e', strength: 5000, stiffness: 200000 },
+    wood: { density: 0.6, friction: 0.7, color: '#d35400', strength: 800, stiffness: 20000 }
 };
 
 // Initialize Matter Engine
@@ -341,73 +341,117 @@ function createStructuralElementClick(x, y, type) {
         collisionFilter: collisionFilter
     });
 
-    // Add custom property for strength
+    // Add custom property for strength and stiffness
     body.strength = isStatic ? 999999 : material.strength;
+    body.stiffness = isStatic ? 999999 : material.stiffness;
 
     Composite.add(world, body);
 
     if (!isStatic) {
-        // Try to connect to existing bodies at endpoints
-        // We need to calculate endpoints based on center (x,y) and rotation
-        const dx = (length / 2) * Math.cos(angle);
-        const dy = (length / 2) * Math.sin(angle);
-
-        connectEndpoint(body, x - dx, y - dy);
-        connectEndpoint(body, x + dx, y + dy);
+        // Connect to any intersecting bodies
+        connectIntersections(body);
     }
 }
 
-function connectEndpoint(newBody, x, y) {
+function connectIntersections(newBody) {
     const allBodies = Composite.allBodies(world);
-    const range = 15;
-
-    // Calculate local offset for newBody
-    const localX = (x - newBody.position.x) * Math.cos(-newBody.angle) - (y - newBody.position.y) * Math.sin(-newBody.angle);
-    const localY = (x - newBody.position.x) * Math.sin(-newBody.angle) + (y - newBody.position.y) * Math.cos(-newBody.angle);
 
     allBodies.forEach(otherBody => {
         if (otherBody === newBody) return;
-        if (otherBody.label === 'ground') return; // Don't connect to ground by default unless foundation
+        if (otherBody.label === 'ground') return;
 
-        const hit = Matter.Query.point([otherBody], { x, y });
+        // Use SAT to detect overlap
+        const collision = Matter.SAT.collides(newBody, otherBody);
 
-        if (hit.length > 0 || isCloseToBody(otherBody, x, y, range)) {
+        if (collision.collided) {
+            // Find approximate center of intersection
+            // SAT returns supports (points of contact)
+            // We can average them to find a good pivot point
+            let px = 0, py = 0;
+            if (collision.supports.length > 0) {
+                collision.supports.forEach(p => {
+                    px += p.x;
+                    py += p.y;
+                });
+                px /= collision.supports.length;
+                py /= collision.supports.length;
+            } else {
+                // Fallback to midpoint of bodies if supports missing (rare)
+                px = (newBody.position.x + otherBody.position.x) / 2;
+                py = (newBody.position.y + otherBody.position.y) / 2;
+            }
 
-            // Calculate local offset for otherBody
-            const otherLocalX = (x - otherBody.position.x) * Math.cos(-otherBody.angle) - (y - otherBody.position.y) * Math.sin(-otherBody.angle);
-            const otherLocalY = (x - otherBody.position.x) * Math.sin(-otherBody.angle) + (y - otherBody.position.y) * Math.cos(-otherBody.angle);
+            // Calculate local offsets
+            const localA = Vector.rotate(Vector.sub({x: px, y: py}, newBody.position), -newBody.angle);
+            const localB = Vector.rotate(Vector.sub({x: px, y: py}, otherBody.position), -otherBody.angle);
 
-            // Check if constraint already exists
-            // ... (omitted for simplicity, Matter handles duplicates reasonably well, or we check)
+            // Initial relative angle for stiffness
+            const initialAngleDiff = newBody.angle - otherBody.angle;
 
-             const constraint = Constraint.create({
+            // Determine joint stiffness and strength based on connected bodies
+            // Use the weaker material property to define the joint's limits
+            let jointStiffness = newBody.stiffness || 50000;
+            if (otherBody.stiffness && otherBody.stiffness < jointStiffness) {
+                jointStiffness = otherBody.stiffness;
+            }
+
+            // Create pivot constraint
+            const constraint = Constraint.create({
                 bodyA: newBody,
                 bodyB: otherBody,
-                pointA: { x: localX, y: localY },
-                pointB: { x: otherLocalX, y: otherLocalY },
-                stiffness: 0.9, // Slightly flexible
+                pointA: localA,
+                pointB: localB,
+                stiffness: 1, // High stiffness for positional anchor
                 length: 0,
-                damping: 0.1,
                 render: {
                     visible: true,
-                    lineWidth: 3,
-                    strokeStyle: '#333'
+                    lineWidth: 0, // Hide the line, we will draw a custom joint
+                    strokeStyle: 'transparent',
+                    anchors: false
                 }
             });
+
+            // Custom properties for bending physics
+            constraint.isStructural = true;
+            constraint.initialAngleDiff = initialAngleDiff;
+            constraint.rotationalStiffness = jointStiffness;
+            constraint.jointColor = '#333'; // Default joint color
 
             Composite.add(world, constraint);
         }
     });
 }
 
-function isCloseToBody(body, x, y, range) {
-    // Simple AABB check first
-    if (x < body.bounds.min.x - range || x > body.bounds.max.x + range ||
-        y < body.bounds.min.y - range || y > body.bounds.max.y + range) {
-        return false;
-    }
-    return true; // Good enough for MVP "close" check
-}
+// Custom renderer for joints
+Events.on(render, 'afterRender', function() {
+    const context = render.context;
+    const constraints = Composite.allConstraints(world);
+
+    context.beginPath();
+    constraints.forEach(c => {
+        if (c.isStructural && c.bodyA && c.bodyB) {
+            // Calculate world position of the joint
+            const p = Vector.add(c.bodyA.position, Vector.rotate(c.pointA, c.bodyA.angle));
+
+            context.moveTo(p.x + 4, p.y);
+            context.arc(p.x, p.y, 4, 0, 2 * Math.PI);
+        }
+    });
+    context.fillStyle = '#000';
+    context.fill();
+
+    // Draw stress indicators if needed (colored circle)
+    constraints.forEach(c => {
+        if (c.isStructural && c.render.strokeStyle === '#ff0000') {
+             const p = Vector.add(c.bodyA.position, Vector.rotate(c.pointA, c.bodyA.angle));
+             context.beginPath();
+             context.arc(p.x, p.y, 6, 0, 2 * Math.PI);
+             context.strokeStyle = '#ff0000';
+             context.lineWidth = 2;
+             context.stroke();
+        }
+    });
+});
 
 
 function createJoint(x, y) {
@@ -644,26 +688,49 @@ Events.on(engine, 'beforeUpdate', (event) => {
     constraints.forEach(c => {
         if (c.label === 'Mouse Constraint') return;
 
-        const pA = c.bodyA ? Vector.add(c.bodyA.position, c.pointA) : c.pointA;
-        const pB = c.bodyB ? Vector.add(c.bodyB.position, c.pointB) : c.pointB;
-        const force = Vector.magnitude(Vector.sub(pA, pB)); // stretch distance as proxy for force/stress
+        // 1. Bending Physics (Rotational Stiffness)
+        if (c.isStructural && c.bodyA && c.bodyB) {
+            const angleDiff = c.bodyA.angle - c.bodyB.angle;
+            const distortion = angleDiff - c.initialAngleDiff;
 
-        // Use material strength from connected bodies
-        let strength = 20; // default
-        if (c.bodyA && c.bodyA.strength) strength = c.bodyA.strength / 50;
-        if (c.bodyB && c.bodyB.strength) strength = Math.min(strength, c.bodyB.strength / 50);
+            // Apply restoring torque (Spring)
+            // Use constraint-specific rotational stiffness derived from material
+            const k = c.rotationalStiffness || 50000;
+            const torque = -k * distortion * 0.001; // Scale down
 
-        // Visual stress indicator
-        if (force > strength * 0.5) {
-            c.render.strokeStyle = '#ff0000';
-        } else {
-            c.render.strokeStyle = '#333';
+            Body.setAngularVelocity(c.bodyA, c.bodyA.angularVelocity + torque / c.bodyA.inertia);
+            Body.setAngularVelocity(c.bodyB, c.bodyB.angularVelocity - torque / c.bodyB.inertia);
+
+            // Store torque load for breaking check
+            c.torqueLoad = Math.abs(torque * 1000);
         }
 
-        // Break
-        if (force > strength) {
+        // 2. Force/Stretch Calculation
+        const pA = c.bodyA ? Vector.add(c.bodyA.position, c.pointA) : c.pointA;
+        const pB = c.bodyB ? Vector.add(c.bodyB.position, c.pointB) : c.pointB;
+        const force = Vector.magnitude(Vector.sub(pA, pB)); // stretch distance
+
+        // Determine Strength Limit
+        let limit = 20; // base
+        if (c.bodyA && c.bodyA.strength) limit = c.bodyA.strength / 50;
+        if (c.bodyB && c.bodyB.strength) limit = Math.min(limit, c.bodyB.strength / 50);
+
+        // Torque limit (bending strength) - approximated from material strength
+        const torqueLimit = limit * 15;
+
+        // Visual stress indicator
+        const torqueStress = (c.torqueLoad || 0) / torqueLimit;
+        const forceStress = force / limit;
+
+        if (forceStress > 0.5 || torqueStress > 0.5) {
+            c.render.strokeStyle = '#ff0000'; // Red warning
+        } else {
+            c.render.strokeStyle = '#000';
+        }
+
+        // Break if either tensile or bending limit exceeded
+        if (forceStress > 1.0 || torqueStress > 1.0) {
              Composite.remove(world, c);
-             // Optional: Visual effect (particle?)
         }
     });
 });
