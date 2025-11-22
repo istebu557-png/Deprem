@@ -7,11 +7,16 @@ Bu proje, basit bir yapısal analiz ve deprem simülasyonu uygulamasıdır. Kull
 *   **Yapı Oluşturma:**
     *   **Kiriş (Yatay):** Yatay yapı elemanları ekleyin.
     *   **Kolon (Dikey):** Dikey taşıyıcı elemanlar ekleyin.
-    *   **Bağlantı Noktası:** Elemanları birbirine bağlamak için manuel bağlantı noktaları ekleyin.
+    *   **Temel (Zemin):** Binanın oturacağı sabit zemin tabanını oluşturun.
     *   **Silme:** Hatalı veya istenmeyen elemanları silin.
 
-*   **Malzeme Seçimi:**
-    *   Beton, Çelik ve Ahşap gibi farklı malzemeler seçerek yapı elemanlarının fiziksel özelliklerini (yoğunluk, dayanıklılık vb.) değiştirebilirsiniz.
+*   **Malzeme ve Boyut Seçimi:**
+    *   Beton, Çelik ve Ahşap gibi farklı malzemeler seçerek yapı elemanlarının fiziksel özelliklerini değiştirebilirsiniz.
+    *   **Kalınlık:** Yapı elemanlarının kalınlığını/genişliğini (cm cinsinden) ayarlayabilirsiniz.
+
+*   **Görünüm Modları:**
+    *   **Yandan Görünüm:** Yerçekiminin olduğu, yapının dikey kesitini test ettiğiniz mod.
+    *   **Kuş Bakışı:** Yerçekimsiz, plan görünümü (deneysel).
 
 *   **Deprem Ayarları:**
     *   **Büyüklük (Magnitude):** Depremin şiddetini ayarlayın (1-10 arası).
@@ -31,11 +36,11 @@ Bu proje, herhangi bir sunucu kurulumu gerektirmeyen, tamamen istemci taraflı (
 
 ## Kullanım
 
-1.  **Yapı İnşa Edin:** Sol paneldeki araçları kullanarak çalışma alanına kiriş ve kolonlar çizin. Çizim yapmak için farenin sol tuşuna basılı tutup sürükleyin.
-2.  **Malzeme Seçin:** "Özellikler" bölümünden kullanacağınız malzemeyi seçin.
+1.  **Yapı İnşa Edin:** Sol paneldeki araçları kullanarak çalışma alanına Temel, Kiriş ve Kolonlar çizin. Çizim yapmak için farenin sol tuşuna basılı tutup sürükleyin.
+2.  **Özellikleri Ayarlayın:** Malzeme tipini ve eleman kalınlığını belirleyin.
 3.  **Deprem Parametrelerini Ayarlayın:** Simüle etmek istediğiniz depremin özelliklerini belirleyin.
-4.  **Test Edin:** "Simülasyonu Başlat" butonuna tıklayarak depremi tetikleyin ve yapınızın davranışını izleyin.
-5.  **Sıfırlayın:** Yeni bir deneme yapmak veya yapıyı düzenlemek için "Sıfırla" butonunu kullanın.
+4.  **Test Edin:** "Simülasyonu Başlat" butonuna tıklayarak depremi tetikleyin.
+5.  **Yeniden Deneyin:** Simülasyon bittiğinde "Sıfırla" butonuna basarak yapıyı ilk haline döndürün ve tekrar test edin.
 
 ## Teknolojiler
 

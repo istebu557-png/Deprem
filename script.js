@@ -31,7 +31,10 @@ const MATERIALS = {
 };
 
 // Initialize Matter Engine
-const engine = Engine.create();
+const engine = Engine.create({
+    positionIterations: 10, // Increase for stability
+    velocityIterations: 10
+});
 const world = engine.world;
 
 // Setup Render
@@ -143,9 +146,11 @@ Runner.run(runner, engine);
 // UI Event Listeners
 document.getElementById('btn-beam').addEventListener('click', () => setMode('beam'));
 document.getElementById('btn-column').addEventListener('click', () => setMode('column'));
-document.getElementById('btn-joint').addEventListener('click', () => setMode('joint'));
+document.getElementById('btn-foundation').addEventListener('click', () => setMode('foundation'));
 document.getElementById('btn-delete').addEventListener('click', () => setMode('delete'));
 document.getElementById('material-type').addEventListener('change', (e) => state.selectedMaterial = e.target.value);
+document.getElementById('element-thickness').addEventListener('input', (e) => document.getElementById('thick-val').textContent = e.target.value);
+
 document.getElementById('btn-start').addEventListener('click', startSimulation);
 document.getElementById('btn-reset').addEventListener('click', resetSimulation);
 document.getElementById('btn-view-mode').addEventListener('click', toggleViewMode);
@@ -180,7 +185,7 @@ function setMode(mode) {
     state.mode = mode;
     document.querySelectorAll('.tool-btn').forEach(btn => btn.classList.remove('active'));
     document.getElementById(`btn-${mode}`).classList.add('active');
-    updateStatus(`Mod: ${mode === 'beam' ? 'Kiriş' : mode === 'column' ? 'Kolon' : mode === 'joint' ? 'Bağlantı' : 'Silme'}`);
+    updateStatus(`Mod: ${mode === 'beam' ? 'Kiriş' : mode === 'column' ? 'Kolon' : mode === 'foundation' ? 'Temel' : 'Silme'}`);
 }
 
 function updateStatus(msg) {
@@ -210,8 +215,6 @@ function handleInputStart(x, y) {
 
     if (state.mode === 'delete') {
         handleDelete(x, y);
-    } else if (state.mode === 'joint') {
-        createJoint(x, y);
     } else {
         startPoint = { x, y };
     }
@@ -225,7 +228,7 @@ function handleInputMove(x, y) {
 function handleInputEnd(x, y) {
     if (state.isSimulating || !startPoint) return;
 
-    if (state.mode === 'beam' || state.mode === 'column') {
+    if (state.mode === 'beam' || state.mode === 'column' || state.mode === 'foundation') {
         createStructuralElement(startPoint.x, startPoint.y, x, y, state.mode);
     }
 
@@ -280,37 +283,38 @@ function createStructuralElement(x1, y1, x2, y2, type) {
     const cx = (x1 + x2) / 2;
     const cy = (y1 + y2) / 2;
 
-    const thickness = type === 'column' ? 20 : 10;
+    // Get user defined thickness
+    const thickness = parseInt(document.getElementById('element-thickness').value) || 20;
+
     const material = MATERIALS[state.selectedMaterial];
+
+    const isStatic = (type === 'foundation');
 
     const body = Bodies.rectangle(cx, cy, length, thickness, {
         angle: angle,
         density: material.density,
         friction: material.friction,
-        render: { fillStyle: material.color },
+        render: { fillStyle: isStatic ? '#555' : material.color },
         label: type,
-        frictionAir: 0.05
+        frictionAir: 0.05,
+        isStatic: isStatic
     });
 
     // Add custom property for strength
-    body.strength = material.strength;
-
-    // Collision filter: beams don't collide with beams immediately?
-    // Default is fine for now.
+    body.strength = isStatic ? 999999 : material.strength;
 
     Composite.add(world, body);
 
-    // Try to connect to existing bodies at endpoints
-    connectEndpoint(body, x1, y1);
-    connectEndpoint(body, x2, y2);
+    if (!isStatic) {
+        // Try to connect to existing bodies at endpoints
+        connectEndpoint(body, x1, y1);
+        connectEndpoint(body, x2, y2);
+    }
 }
 
 function connectEndpoint(newBody, x, y) {
     const allBodies = Composite.allBodies(world);
     const range = 15;
-
-    // Find bodies close to (x, y)
-    // We want to connect newBody's specific point (local offset) to the other body's specific point
 
     // Calculate local offset for newBody
     const localX = (x - newBody.position.x) * Math.cos(-newBody.angle) - (y - newBody.position.y) * Math.sin(-newBody.angle);
@@ -318,28 +322,25 @@ function connectEndpoint(newBody, x, y) {
 
     allBodies.forEach(otherBody => {
         if (otherBody === newBody) return;
-
-        // Check if (x,y) is close to otherBody
-        // Using Bounds or vertices check is expensive, let's check vertices or just center + size approximation
-        // Or just use distance to center if small, but beams are long.
-        // Better: check distance to otherBody's closest point.
+        if (otherBody.label === 'ground') return; // Don't connect to ground by default unless foundation
 
         const hit = Matter.Query.point([otherBody], { x, y });
 
-        // Also check distance to endpoints of otherBody if it is a beam/column
-        // But simplify: if point is inside otherBody
         if (hit.length > 0 || isCloseToBody(otherBody, x, y, range)) {
 
             // Calculate local offset for otherBody
             const otherLocalX = (x - otherBody.position.x) * Math.cos(-otherBody.angle) - (y - otherBody.position.y) * Math.sin(-otherBody.angle);
             const otherLocalY = (x - otherBody.position.x) * Math.sin(-otherBody.angle) + (y - otherBody.position.y) * Math.cos(-otherBody.angle);
 
+            // Check if constraint already exists
+            // ... (omitted for simplicity, Matter handles duplicates reasonably well, or we check)
+
              const constraint = Constraint.create({
                 bodyA: newBody,
                 bodyB: otherBody,
                 pointA: { x: localX, y: localY },
                 pointB: { x: otherLocalX, y: otherLocalY },
-                stiffness: 0.9,
+                stiffness: 0.9, // Slightly flexible
                 length: 0,
                 damping: 0.1,
                 render: {
@@ -348,6 +349,7 @@ function connectEndpoint(newBody, x, y) {
                     strokeStyle: '#333'
                 }
             });
+
             Composite.add(world, constraint);
         }
     });
@@ -407,8 +409,21 @@ function Query(x, y) {
 }
 
 // Simulation Logic
+let savedState = null;
+
 function startSimulation() {
     if (state.isSimulating) return;
+
+    // Save current world state (bodies and constraints)
+    // We can't easily clone Box2D/Matter bodies completely, but for this simple app
+    // we can store their definitions or just accept we need to rebuild?
+    // Rebuilding is safer but complex.
+    // Alternative: Store initial positions/angles and restore them?
+    // But bodies might break (constraints removed).
+    // So we need to backup the entire world structure.
+
+    saveWorldState();
+
     state.isSimulating = true;
     earthquakeTimer = 0;
     updateStatus("Simülasyon Başladı: Deprem Uygulanıyor...");
@@ -417,10 +432,111 @@ function startSimulation() {
 function resetSimulation() {
     state.isSimulating = false;
     updateStatus("Düzenleme Modu");
-    engine.gravity.y = 0;
 
-    Composite.clear(world, false, true);
-    if (!world.bodies.includes(ground)) Composite.add(world, ground);
+    // Stop earthquake gravity
+    if (state.viewMode === 'side') {
+         engine.gravity.y = 0;
+    }
+
+    // Restore logic:
+    // If we have a saved state, we want to restore it.
+    // But "Reset" usually means "Clear All" or "Stop & Restore"?
+    // Standard behavior: Stop and go back to editor.
+    // Let's make "Reset" function as "Stop & Restore".
+    // If user wants to clear, they can select all and delete or we add a "Clear All" button.
+    // For now, let's make this button "Stop / Restore".
+
+    restoreWorldState();
+}
+
+function saveWorldState() {
+    // Simple serialization of what matters: type, geometry, material, connections
+    // We can iterate bodies and constraints.
+    const bodies = Composite.allBodies(world).filter(b => b.label !== 'ground');
+    const constraints = Composite.allConstraints(world).filter(c => c.label !== 'Mouse Constraint');
+
+    savedState = {
+        bodies: bodies.map(b => ({
+            position: { x: b.position.x, y: b.position.y },
+            angle: b.angle,
+            velocity: { x: 0, y: 0 },
+            angularVelocity: 0,
+            id: b.id
+        })),
+        constraints: constraints.map(c => ({
+            bodyAId: c.bodyA ? c.bodyA.id : null,
+            bodyBId: c.bodyB ? c.bodyB.id : null,
+            pointA: c.pointA,
+            pointB: c.pointB,
+            stiffness: c.stiffness,
+            length: c.length,
+            label: c.label
+        }))
+        // Note: this doesn't save "broken" constraints logic if we remove them during sim.
+        // If we remove them, we can't just "restore" position. We need to recreate the constraint.
+        // So "Restore" needs to fully reconstruct?
+        // Or we just don't remove them, we disable them?
+        // Removing is better for physics.
+
+        // Better approach for "Save/Restore":
+        // We don't save the physics bodies. We save the "Blueprint".
+        // But we don't have a blueprint model, we just have physics bodies.
+
+        // Strategy: Clone the world objects? No, Matter.js clone is tricky.
+        // Strategy: Re-position and Re-add constraints?
+        // If constraints were removed, we can't re-add them unless we saved their config.
+        // YES, `savedState.constraints` has the config.
+    };
+}
+
+function restoreWorldState() {
+    if (!savedState) return;
+
+    // 1. Reset positions/velocities of bodies
+    const currentBodies = Composite.allBodies(world);
+
+    // Issue: If we added bodies during sim? No, we don't.
+    // We only remove constraints.
+
+    savedState.bodies.forEach(savedData => {
+        const body = currentBodies.find(b => b.id === savedData.id);
+        if (body) {
+            Body.setPosition(body, savedData.position);
+            Body.setAngle(body, savedData.angle);
+            Body.setVelocity(body, { x: 0, y: 0 });
+            Body.setAngularVelocity(body, 0);
+        }
+    });
+
+    // 2. Restore constraints
+    // The simulation removes constraints when they break.
+    // We need to add them back if they are missing.
+    // Or simpler: Clear all constraints and re-create from savedState?
+    // But we need references to bodies.
+
+    // Let's remove all current constraints (except mouse) and rebuild from savedState
+    const currentConstraints = Composite.allConstraints(world);
+    currentConstraints.forEach(c => {
+        if (c.label !== 'Mouse Constraint') Composite.remove(world, c);
+    });
+
+    savedState.constraints.forEach(savedC => {
+        const bodyA = savedC.bodyAId ? currentBodies.find(b => b.id === savedC.bodyAId) : null;
+        const bodyB = savedC.bodyBId ? currentBodies.find(b => b.id === savedC.bodyBId) : null;
+
+        if ((savedC.bodyAId && !bodyA) || (savedC.bodyBId && !bodyB)) return; // Body missing?
+
+        const newConstraint = Constraint.create({
+            bodyA: bodyA,
+            bodyB: bodyB,
+            pointA: savedC.pointA,
+            pointB: savedC.pointB,
+            stiffness: savedC.stiffness,
+            length: savedC.length,
+            render: { visible: true, lineWidth: 3, strokeStyle: '#333' } // Default style
+        });
+        Composite.add(world, newConstraint);
+    });
 }
 
 

@@ -15,7 +15,7 @@
                 <h3>Yapı Elemanları</h3>
                 <button id="btn-beam" class="tool-btn active">Kiriş (Yatay)</button>
                 <button id="btn-column" class="tool-btn">Kolon (Dikey)</button>
-                <button id="btn-joint" class="tool-btn">Bağlantı Noktası</button>
+                <button id="btn-foundation" class="tool-btn">Temel (Zemin)</button>
                 <button id="btn-delete" class="tool-btn" style="background-color: #ffcccc;">Sil</button>
             </div>
 
@@ -27,6 +27,9 @@
                     <option value="steel">Çelik</option>
                     <option value="wood">Ahşap</option>
                 </select>
+
+                <label for="element-thickness">Kalınlık (cm): <span id="thick-val">20</span></label>
+                <input type="range" id="element-thickness" min="10" max="100" step="5" value="20">
             </div>
 
             <div class="control-group">
