@@ -20,7 +20,7 @@ const state = {
     tempBody: null,
     zoom: 1,
     pan: { x: 0, y: 0 },
-    viewMode: 'side' // side, top
+    selectedBody: null
 };
 
 // Material Properties (Simplified)
@@ -120,7 +120,7 @@ Events.on(render, 'beforeRender', function() {
     const height = render.canvas.height;
 
     context.beginPath();
-    context.strokeStyle = '#ccc';
+    context.strokeStyle = '#999'; // Darker grid
     context.lineWidth = 1;
 
     // Draw vertical lines
@@ -150,28 +150,13 @@ document.getElementById('btn-foundation').addEventListener('click', () => setMod
 document.getElementById('btn-delete').addEventListener('click', () => setMode('delete'));
 document.getElementById('material-type').addEventListener('change', (e) => state.selectedMaterial = e.target.value);
 document.getElementById('element-thickness').addEventListener('input', (e) => document.getElementById('thick-val').textContent = e.target.value);
+document.getElementById('element-length').addEventListener('input', (e) => document.getElementById('len-val').textContent = e.target.value);
 
 document.getElementById('btn-start').addEventListener('click', startSimulation);
 document.getElementById('btn-reset').addEventListener('click', resetSimulation);
-document.getElementById('btn-view-mode').addEventListener('click', toggleViewMode);
-
-function toggleViewMode() {
-    if (state.viewMode === 'side') {
-        state.viewMode = 'top';
-        document.getElementById('btn-view-mode').textContent = 'Görünüm: Kuş Bakışı';
-        engine.gravity.y = 0; // No gravity in top view
-        // In top view, maybe we hide the ground or make it look like a floor?
-        ground.render.visible = false;
-    } else {
-        state.viewMode = 'side';
-        document.getElementById('btn-view-mode').textContent = 'Görünüm: Yandan';
-        // Gravity is only enabled during simulation in side view
-        if (state.isSimulating) {
-            engine.gravity.y = 1;
-        }
-        ground.render.visible = true;
-    }
-}
+document.getElementById('btn-edit').addEventListener('click', () => setMode('edit'));
+document.getElementById('btn-rotate-cw').addEventListener('click', () => rotateSelected(Math.PI / 4));
+document.getElementById('btn-rotate-ccw').addEventListener('click', () => rotateSelected(-Math.PI / 4));
 
 // Sliders
 ['magnitude', 'depth', 'duration'].forEach(id => {
@@ -184,8 +169,33 @@ function setMode(mode) {
     if (state.isSimulating) return;
     state.mode = mode;
     document.querySelectorAll('.tool-btn').forEach(btn => btn.classList.remove('active'));
-    document.getElementById(`btn-${mode}`).classList.add('active');
-    updateStatus(`Mod: ${mode === 'beam' ? 'Kiriş' : mode === 'column' ? 'Kolon' : mode === 'foundation' ? 'Temel' : 'Silme'}`);
+
+    // Handle edit button separately or as a tool
+    if (mode === 'edit') {
+         document.getElementById('btn-edit').classList.add('active');
+         document.getElementById('edit-controls').style.display = 'block';
+         updateStatus("Düzenleme Modu: Parçaları seçin, sürükleyin veya döndürün.");
+
+         // Enable mouse interaction for dragging
+         mouseConstraint.collisionFilter.mask = 0xFFFFFFFF;
+    } else {
+         if (document.getElementById(`btn-${mode}`)) {
+            document.getElementById(`btn-${mode}`).classList.add('active');
+         }
+         document.getElementById('btn-edit').classList.remove('active');
+         document.getElementById('edit-controls').style.display = 'none';
+         state.selectedBody = null; // Deselect
+         updateStatus(`Mod: ${mode === 'beam' ? 'Kiriş' : mode === 'column' ? 'Kolon' : mode === 'foundation' ? 'Temel' : 'Silme'}`);
+
+         // Disable mouse interaction to prevent accidental dragging while creating
+         mouseConstraint.collisionFilter.mask = 0;
+    }
+}
+
+function rotateSelected(angle) {
+    if (state.mode === 'edit' && state.selectedBody) {
+        Body.rotate(state.selectedBody, angle);
+    }
 }
 
 function updateStatus(msg) {
@@ -193,20 +203,25 @@ function updateStatus(msg) {
 }
 
 // Building Logic
-let startPoint = null;
-let currentPoint = null;
+// With new logic, we don't need startPoint/drag for creation, only click.
+// But we might need it for "Edit" mode dragging if we handle it manually?
+// Actually MouseConstraint handles dragging.
 
 Events.on(render, 'afterRender', function() {
-    if (startPoint && currentPoint && !state.isSimulating) {
+    // Draw selection highlight
+    if (state.mode === 'edit' && state.selectedBody) {
         const context = render.context;
+        const body = state.selectedBody;
         context.beginPath();
-        context.moveTo(startPoint.x, startPoint.y);
-        context.lineTo(currentPoint.x, currentPoint.y);
-        context.lineWidth = 2;
-        context.strokeStyle = '#000';
-        context.setLineDash([5, 5]); // Dashed line
+        const vertices = body.vertices;
+        context.moveTo(vertices[0].x, vertices[0].y);
+        for (let j = 1; j < vertices.length; j += 1) {
+            context.lineTo(vertices[j].x, vertices[j].y);
+        }
+        context.lineTo(vertices[0].x, vertices[0].y);
+        context.lineWidth = 3;
+        context.strokeStyle = '#00ff00'; // Green highlight
         context.stroke();
-        context.setLineDash([]); // Reset dash
     }
 });
 
@@ -215,25 +230,36 @@ function handleInputStart(x, y) {
 
     if (state.mode === 'delete') {
         handleDelete(x, y);
-    } else {
-        startPoint = { x, y };
+    } else if (state.mode === 'edit') {
+        handleSelection(x, y);
+    } else if (['beam', 'column', 'foundation'].includes(state.mode)) {
+        // Create immediately at (x,y)
+        createStructuralElementClick(x, y, state.mode);
     }
 }
 
 function handleInputMove(x, y) {
-    if (state.isSimulating || !startPoint) return;
-    currentPoint = { x, y };
+    // No specific move logic needed unless we want to show a preview ghost?
+    // For now, just rely on Click.
 }
 
 function handleInputEnd(x, y) {
-    if (state.isSimulating || !startPoint) return;
+    // No specific end logic needed for click-to-create.
+}
 
-    if (state.mode === 'beam' || state.mode === 'column' || state.mode === 'foundation') {
-        createStructuralElement(startPoint.x, startPoint.y, x, y, state.mode);
+function handleSelection(x, y) {
+    const bodies = Query(x, y);
+    // Filter out ground if we don't want to edit it, or allow it.
+    // Let's avoid selecting ground for now as it is huge.
+    const found = bodies.find(b => b.label !== 'ground');
+
+    if (found) {
+        state.selectedBody = found;
+        updateStatus(`Seçildi: ${found.label === 'beam' ? 'Kiriş' : found.label === 'column' ? 'Kolon' : 'Temel'}`);
+    } else {
+        state.selectedBody = null;
+        updateStatus("Düzenleme Modu: Seçim temizlendi.");
     }
-
-    startPoint = null;
-    currentPoint = null;
 }
 
 render.canvas.addEventListener('mousedown', (e) => {
@@ -275,29 +301,44 @@ render.canvas.addEventListener('touchend', (e) => {
     handleInputEnd(touch.clientX - rect.left, touch.clientY - rect.top);
 }, { passive: false });
 
-function createStructuralElement(x1, y1, x2, y2, type) {
-    const length = Math.hypot(x2 - x1, y2 - y1);
-    if (length < 20) return; // Too small
-
-    const angle = Math.atan2(y2 - y1, x2 - x1);
-    const cx = (x1 + x2) / 2;
-    const cy = (y1 + y2) / 2;
-
-    // Get user defined thickness
+function createStructuralElementClick(x, y, type) {
+    const length = parseInt(document.getElementById('element-length').value) || 200;
     const thickness = parseInt(document.getElementById('element-thickness').value) || 20;
 
-    const material = MATERIALS[state.selectedMaterial];
+    let angle = 0;
+    if (type === 'column') angle = Math.PI / 2; // 90 degrees
+    // Beam and Foundation default to 0
 
+    const material = MATERIALS[state.selectedMaterial];
     const isStatic = (type === 'foundation');
 
-    const body = Bodies.rectangle(cx, cy, length, thickness, {
+    // Collision filter:
+    // Category 0x0002 for structural elements.
+    // Mask 0x0001 (default Category is 0x0001). Ground is default.
+    // We want them to collide with Ground (0x0001) but NOT with each other (0x0002).
+    // But wait, if they don't collide with each other, they can pass through.
+    // That is what the user requested: "iç içe geçmeli".
+    // Ground is usually category 1.
+    // So we set category 2. Mask 1.
+
+    const collisionFilter = {
+        category: 0x0002,
+        mask: 0x0001 // Only collide with category 1 (Ground)
+    };
+
+    // However, if we want them to connect, they rely on constraints, which is fine.
+    // But if they don't collide, they might look weird if not connected?
+    // User said "parçalar birbirine çarpınca iç içe geçmeli".
+
+    const body = Bodies.rectangle(x, y, length, thickness, {
         angle: angle,
         density: material.density,
         friction: material.friction,
         render: { fillStyle: isStatic ? '#555' : material.color },
         label: type,
         frictionAir: 0.05,
-        isStatic: isStatic
+        isStatic: isStatic,
+        collisionFilter: collisionFilter
     });
 
     // Add custom property for strength
@@ -307,8 +348,12 @@ function createStructuralElement(x1, y1, x2, y2, type) {
 
     if (!isStatic) {
         // Try to connect to existing bodies at endpoints
-        connectEndpoint(body, x1, y1);
-        connectEndpoint(body, x2, y2);
+        // We need to calculate endpoints based on center (x,y) and rotation
+        const dx = (length / 2) * Math.cos(angle);
+        const dy = (length / 2) * Math.sin(angle);
+
+        connectEndpoint(body, x - dx, y - dy);
+        connectEndpoint(body, x + dx, y + dy);
     }
 }
 
@@ -433,10 +478,8 @@ function resetSimulation() {
     state.isSimulating = false;
     updateStatus("Düzenleme Modu");
 
-    // Stop earthquake gravity
-    if (state.viewMode === 'side') {
-         engine.gravity.y = 0;
-    }
+    // Stop earthquake gravity (reset to 0 for editing)
+    engine.gravity.y = 0;
 
     // Restore logic:
     // If we have a saved state, we want to restore it.
@@ -541,7 +584,7 @@ function restoreWorldState() {
 
 
 // Gravity control
-engine.gravity.y = 0;
+engine.gravity.y = 0; // Initially 0 for editing
 
 // Earthquake Logic
 let earthquakeTimer = 0;
@@ -556,11 +599,8 @@ Events.on(engine, 'beforeUpdate', (event) => {
         return;
     }
 
-    if (state.viewMode === 'side') {
-        engine.gravity.y = 1;
-    } else {
-        engine.gravity.y = 0; // Top view has no vertical gravity
-    }
+    // Always enable gravity during simulation (Side View behavior)
+    engine.gravity.y = 1;
 
     const magnitude = parseFloat(document.getElementById('magnitude').value);
     const depth = parseFloat(document.getElementById('depth').value);

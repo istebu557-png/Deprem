@@ -30,6 +30,9 @@
 
                 <label for="element-thickness">Kalınlık (cm): <span id="thick-val">20</span></label>
                 <input type="range" id="element-thickness" min="10" max="100" step="5" value="20">
+
+                <label for="element-length">Uzunluk (cm): <span id="len-val">200</span></label>
+                <input type="range" id="element-length" min="50" max="1000" step="10" value="200">
             </div>
 
             <div class="control-group">
@@ -45,7 +48,14 @@
             </div>
 
             <div class="control-group">
-                <button id="btn-view-mode" class="action-btn secondary" style="background-color: #17a2b8;">Görünüm: Yandan</button>
+                <button id="btn-edit" class="action-btn secondary" style="background-color: #6f42c1;">Düzenleme Modu</button>
+                <div id="edit-controls" style="display: none; margin-top: 5px;">
+                    <button id="btn-rotate-cw" class="tool-btn">Döndür (+45°)</button>
+                    <button id="btn-rotate-ccw" class="tool-btn">Döndür (-45°)</button>
+                </div>
+            </div>
+
+            <div class="control-group">
                 <button id="btn-start" class="action-btn">Simülasyonu Başlat (Test Et)</button>
                 <button id="btn-reset" class="action-btn secondary">Sıfırla</button>
             </div>

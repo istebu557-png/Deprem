@@ -5,18 +5,15 @@ Bu proje, basit bir yapısal analiz ve deprem simülasyonu uygulamasıdır. Kull
 ## Özellikler
 
 *   **Yapı Oluşturma:**
-    *   **Kiriş (Yatay):** Yatay yapı elemanları ekleyin.
-    *   **Kolon (Dikey):** Dikey taşıyıcı elemanlar ekleyin.
+    *   **Kiriş:** Yatay yapı elemanları ekleyin.
+    *   **Kolon:** Dikey taşıyıcı elemanlar ekleyin.
     *   **Temel (Zemin):** Binanın oturacağı sabit zemin tabanını oluşturun.
+    *   **Düzenleme Modu:** Oluşturulan parçaları seçin, sürükleyerek taşıyın veya döndürün.
     *   **Silme:** Hatalı veya istenmeyen elemanları silin.
 
 *   **Malzeme ve Boyut Seçimi:**
     *   Beton, Çelik ve Ahşap gibi farklı malzemeler seçerek yapı elemanlarının fiziksel özelliklerini değiştirebilirsiniz.
-    *   **Kalınlık:** Yapı elemanlarının kalınlığını/genişliğini (cm cinsinden) ayarlayabilirsiniz.
-
-*   **Görünüm Modları:**
-    *   **Yandan Görünüm:** Yerçekiminin olduğu, yapının dikey kesitini test ettiğiniz mod.
-    *   **Kuş Bakışı:** Yerçekimsiz, plan görünümü (deneysel).
+    *   **Kalınlık ve Uzunluk:** Yapı elemanlarının boyutlarını oluşturmadan önce cm cinsinden ayarlayabilirsiniz.
 
 *   **Deprem Ayarları:**
     *   **Büyüklük (Magnitude):** Depremin şiddetini ayarlayın (1-10 arası).
@@ -36,8 +33,13 @@ Bu proje, herhangi bir sunucu kurulumu gerektirmeyen, tamamen istemci taraflı (
 
 ## Kullanım
 
-1.  **Yapı İnşa Edin:** Sol paneldeki araçları kullanarak çalışma alanına Temel, Kiriş ve Kolonlar çizin. Çizim yapmak için farenin sol tuşuna basılı tutup sürükleyin.
-2.  **Özellikleri Ayarlayın:** Malzeme tipini ve eleman kalınlığını belirleyin.
+1.  **Yapı İnşa Edin:**
+    *   Önce sol panelden "Kiriş", "Kolon" veya "Temel" aracını seçin.
+    *   "Özellikler" panelinden **Uzunluk** ve **Kalınlık** değerlerini ayarlayın.
+    *   Çalışma alanında (Canvas) parçayı koymak istediğiniz yere **tıklayın**.
+2.  **Düzenleyin:** "Düzenleme Modu"na geçin. Bir parçaya tıklayarak seçin (yeşil yanar).
+    *   Seçili parçayı sürükleyerek taşıyabilirsiniz.
+    *   Paneldeki "Döndür" butonları ile parçayı çevirebilirsiniz.
 3.  **Deprem Parametrelerini Ayarlayın:** Simüle etmek istediğiniz depremin özelliklerini belirleyin.
 4.  **Test Edin:** "Simülasyonu Başlat" butonuna tıklayarak depremi tetikleyin.
 5.  **Yeniden Deneyin:** Simülasyon bittiğinde "Sıfırla" butonuna basarak yapıyı ilk haline döndürün ve tekrar test edin.
