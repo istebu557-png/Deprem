@@ -359,9 +359,15 @@ function handleSelectionAndDragStart(x, y) {
         document.getElementById('thick-val').textContent = Math.round(thick);
 
         updateStatus(`Seçildi: ${found.label === 'beam' ? 'Kiriş' : found.label === 'column' ? 'Kolon' : 'Temel'}`);
+
+        // Visual feedback for properties panel
+        document.querySelector('.control-group:nth-child(2)').style.backgroundColor = '#e8f0fe';
     } else {
         state.selectedBody = null;
         updateStatus("Düzenleme Modu: Seçim temizlendi.");
+
+        // Remove feedback
+        document.querySelector('.control-group:nth-child(2)').style.backgroundColor = '';
     }
 }
 
@@ -635,7 +641,93 @@ function startSimulation() {
     // Enable mouse interaction during simulation
     mouseConstraint.collisionFilter.mask = 0xFFFFFFFF;
 
+    // Recalculate connections based on current positions
+    rebuildConnections();
+
     updateStatus("Simülasyon Başladı: Deprem Uygulanıyor...");
+}
+
+function rebuildConnections() {
+    // Remove existing structural constraints to avoid duplicates or stretched bonds
+    // We keep MouseConstraint and maybe 'Joint' bodies if they are manual?
+    // User requested "calculate intersection points again".
+    // So we assume current overlaps define the new structure.
+
+    const constraints = Composite.allConstraints(world);
+    constraints.forEach(c => {
+        if (c.isStructural) {
+            Composite.remove(world, c);
+        }
+    });
+
+    // Find all structural bodies
+    const bodies = Composite.allBodies(world).filter(b => b.label !== 'ground' && b.label !== 'Rectangle Body');
+
+    // Check pairs for overlap
+    for (let i = 0; i < bodies.length; i++) {
+        for (let j = i + 1; j < bodies.length; j++) {
+            const bodyA = bodies[i];
+            const bodyB = bodies[j];
+
+            // Check overlap
+            const collision = Matter.SAT.collides(bodyA, bodyB);
+            if (collision.collided) {
+                createConnection(bodyA, bodyB, collision);
+            }
+        }
+    }
+}
+
+function createConnection(newBody, otherBody, collision) {
+    // Shared logic extracted from connectIntersections (simplified)
+    // Find approximate center of intersection
+    let px = 0, py = 0;
+    if (collision && collision.supports && collision.supports.length > 0) {
+        collision.supports.forEach(p => {
+            px += p.x;
+            py += p.y;
+        });
+        px /= collision.supports.length;
+        py /= collision.supports.length;
+    } else {
+        px = (newBody.position.x + otherBody.position.x) / 2;
+        py = (newBody.position.y + otherBody.position.y) / 2;
+    }
+
+    // Calculate local offsets
+    const localA = Vector.rotate(Vector.sub({x: px, y: py}, newBody.position), -newBody.angle);
+    const localB = Vector.rotate(Vector.sub({x: px, y: py}, otherBody.position), -otherBody.angle);
+
+    // Initial relative angle for stiffness
+    const initialAngleDiff = newBody.angle - otherBody.angle;
+
+    // Determine joint stiffness
+    let jointStiffness = newBody.stiffness || 50000;
+    if (otherBody.stiffness && otherBody.stiffness < jointStiffness) {
+        jointStiffness = otherBody.stiffness;
+    }
+
+    const constraint = Constraint.create({
+        bodyA: newBody,
+        bodyB: otherBody,
+        pointA: localA,
+        pointB: localB,
+        stiffness: 1,
+        length: 0,
+        render: {
+            visible: true,
+            lineWidth: 0,
+            strokeStyle: 'transparent',
+            anchors: false
+        }
+    });
+
+    constraint.isStructural = true;
+    constraint.initialAngleDiff = initialAngleDiff;
+    constraint.rotationalStiffness = jointStiffness;
+    constraint.jointColor = '#333';
+
+    Composite.add(world, constraint);
 }
 
 function resetSimulation() {
