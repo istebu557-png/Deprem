@@ -32,8 +32,8 @@ const MATERIALS = {
 
 // Initialize Matter Engine
 const engine = Engine.create({
-    positionIterations: 10, // Increase for stability
-    velocityIterations: 10
+    positionIterations: 20, // Increase for stability
+    velocityIterations: 20
 });
 const world = engine.world;
 
@@ -56,9 +56,9 @@ const render = Render.create({
 // Ground
 const ground = Bodies.rectangle(
     container.clientWidth / 2,
-    container.clientHeight - 20,
+    container.clientHeight + 230, // Offset to keep the top surface at the same visual level
     container.clientWidth * 2,
-    40,
+    540, // Much thicker to prevent tunneling
     {
         isStatic: true,
         render: {
@@ -80,16 +80,16 @@ Events.on(render, 'afterRender', function() {
     const body = ground;
     const pos = body.position;
     const width = 2000; // Approximate large width
-    const height = 40;
+    const height = 540;
 
     context.save();
     context.translate(pos.x, pos.y);
     context.rotate(body.angle);
 
-    // Draw stripes on ground
+    // Draw stripes on ground (only on the top part)
     context.fillStyle = '#34495e';
     for(let i = -width/2; i < width/2; i+=50) {
-        context.fillRect(i, -height/2, 20, height);
+        context.fillRect(i, -height/2, 20, 40); // Draw visual surface
     }
 
     context.restore();
@@ -515,6 +515,16 @@ function startSimulation() {
 
     state.isSimulating = true;
     earthquakeTimer = 0;
+
+    // Enable collisions between all structural elements
+    const bodies = Composite.allBodies(world);
+    bodies.forEach(body => {
+        if (body.label !== 'ground' && body.label !== 'Rectangle Body') { // Skip mouse constraint body if any
+             // Allow collision with everything (default mask)
+             body.collisionFilter.mask = 0xFFFFFFFF;
+        }
+    });
+
     updateStatus("Simülasyon Başladı: Deprem Uygulanıyor...");
 }
 
@@ -524,6 +534,21 @@ function resetSimulation() {
 
     // Stop earthquake gravity (reset to 0 for editing)
     engine.gravity.y = 0;
+
+    // Restore collisions (Edit Mode: ignore each other, only collide with ground)
+    // This will be handled by restoreWorldState actually, if we restore properly.
+    // But since restoreWorldState restores from savedState, and savedState doesn't store collisionFilter deep props (it stores bodies),
+    // Wait, savedState only stores position/angle. It finds body by ID.
+    // The bodies persist in the world? No, restoreWorldState re-positions existing bodies.
+    // So we need to manually revert collision filters here.
+
+    const bodies = Composite.allBodies(world);
+    bodies.forEach(body => {
+        if (body.label !== 'ground') {
+             // Reset to original mask: 0x0001 (Ground only)
+             body.collisionFilter.mask = 0x0001;
+        }
+    });
 
     // Restore logic:
     // If we have a saved state, we want to restore it.
@@ -741,6 +766,6 @@ window.addEventListener('resize', () => {
     render.canvas.height = container.clientHeight;
     Body.setPosition(ground, {
         x: container.clientWidth / 2,
-        y: container.clientHeight - 20
+        y: container.clientHeight + 230
     });
 });
