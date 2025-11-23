@@ -25,7 +25,7 @@ const state = {
     dragOffset: { x: 0, y: 0 }
 };
 
-const SNAP_VAL = 20; // 20px grid snap
+const SNAP_VAL = 5; // 5px grid snap for finer alignment
 
 // Material Properties (Simplified)
 const MATERIALS = {
@@ -161,6 +161,7 @@ document.getElementById('btn-reset').addEventListener('click', resetSimulation);
 document.getElementById('btn-edit').addEventListener('click', () => setMode('edit'));
 document.getElementById('btn-rotate-cw').addEventListener('click', () => rotateSelected(Math.PI / 4));
 document.getElementById('btn-rotate-ccw').addEventListener('click', () => rotateSelected(-Math.PI / 4));
+document.getElementById('btn-reconnect').addEventListener('click', rebuildConnections);
 
 // Sliders
 ['magnitude', 'depth', 'duration'].forEach(id => {
