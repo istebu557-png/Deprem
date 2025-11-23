@@ -20,8 +20,12 @@ const state = {
     tempBody: null,
     zoom: 1,
     pan: { x: 0, y: 0 },
-    selectedBody: null
+    selectedBody: null,
+    dragBody: null,
+    dragOffset: { x: 0, y: 0 }
 };
+
+const SNAP_VAL = 20; // 20px grid snap
 
 // Material Properties (Simplified)
 const MATERIALS = {
@@ -165,6 +169,60 @@ document.getElementById('btn-rotate-ccw').addEventListener('click', () => rotate
     el.addEventListener('input', (e) => disp.textContent = e.target.value);
 });
 
+// Resizing logic for selected body
+function updateSelectedBodyDimensions() {
+    if (!state.selectedBody) return;
+    const body = state.selectedBody;
+    const length = parseInt(document.getElementById('element-length').value) || 200;
+    const thickness = parseInt(document.getElementById('element-thickness').value) || 20;
+
+    // We can't easily resize a body in Matter.js without issues.
+    // Best way: Create a new body with same properties and replace it?
+    // Or scale it? Scale is accumulative.
+    // Or setVertices.
+    // Rectangle vertices are simple.
+    // We need to keep the angle.
+    // Local vertices for a rectangle:
+    // width=length, height=thickness (assuming Horizontal creation default).
+    // If it was created as Column, it was rotated 90deg.
+    // But we are setting 'length' and 'thickness'.
+    // If it is rotated, what is length?
+    // Let's assume 'length' is always the long dimension along the body's local x-axis (before rotation).
+    // If we use Body.setVertices, we define vertices relative to center? No, Body.setVertices takes world points.
+    // Easier: Matter.Bodies.rectangle gives us vertices.
+    // We create a dummy body to get vertices, then apply to real body.
+
+    // Check if it's a column (rotated 90 initially) or beam.
+    // Actually, we just treat Length as Width and Thickness as Height in local space.
+    // Wait, if it's a column, we created it with angle 90. So its 'width' is length.
+    // So consistent logic: Length = body.width (local), Thickness = body.height (local).
+
+    const angle = body.angle;
+    const position = body.position;
+
+    // Generate new vertices for a rectangle at (0,0) with 0 rotation
+    // then we will rotate and translate them?
+    // Body.setVertices calculates properties from vertices.
+    const dummy = Bodies.rectangle(position.x, position.y, length, thickness, { angle: angle });
+
+    // Apply to existing body
+    Body.setVertices(body, dummy.vertices);
+
+    // Restore density/mass/inertia logic if needed (setVertices updates them based on area)
+    // We want to keep material density.
+    const material = MATERIALS[state.selectedMaterial] || MATERIALS['concrete']; // Fallback
+    Body.setDensity(body, material.density);
+}
+
+document.getElementById('element-length').addEventListener('input', (e) => {
+    document.getElementById('len-val').textContent = e.target.value;
+    updateSelectedBodyDimensions();
+});
+document.getElementById('element-thickness').addEventListener('input', (e) => {
+    document.getElementById('thick-val').textContent = e.target.value;
+    updateSelectedBodyDimensions();
+});
+
 function setMode(mode) {
     if (state.isSimulating) return;
     state.mode = mode;
@@ -176,8 +234,15 @@ function setMode(mode) {
          document.getElementById('edit-controls').style.display = 'block';
          updateStatus("Düzenleme Modu: Parçaları seçin, sürükleyin veya döndürün.");
 
-         // Enable mouse interaction for dragging
-         mouseConstraint.collisionFilter.mask = 0xFFFFFFFF;
+         // Disable MouseConstraint for dragging (we will use custom drag logic for snapping)
+         // But we need it for 'mousedown' to identify bodies?
+         // Actually, MouseConstraint handles 'mousedown' selection well.
+         // But it also handles 'drag'.
+         // If we set collisionFilter.mask = 0, it won't pick anything.
+         // We want picking but NO dragging.
+         // Unfortunately, MouseConstraint binds them together.
+         // Solution: Set mask to 0, use our own Query for picking and dragging.
+         mouseConstraint.collisionFilter.mask = 0;
     } else {
          if (document.getElementById(`btn-${mode}`)) {
             document.getElementById(`btn-${mode}`).classList.add('active');
@@ -231,7 +296,7 @@ function handleInputStart(x, y) {
     if (state.mode === 'delete') {
         handleDelete(x, y);
     } else if (state.mode === 'edit') {
-        handleSelection(x, y);
+        handleSelectionAndDragStart(x, y);
     } else if (['beam', 'column', 'foundation'].includes(state.mode)) {
         // Create immediately at (x,y)
         createStructuralElementClick(x, y, state.mode);
@@ -239,22 +304,60 @@ function handleInputStart(x, y) {
 }
 
 function handleInputMove(x, y) {
-    // No specific move logic needed unless we want to show a preview ghost?
-    // For now, just rely on Click.
+    if (state.isSimulating) return;
+
+    if (state.mode === 'edit' && state.dragBody) {
+        // Calculate new position
+        const targetX = x - state.dragOffset.x;
+        const targetY = y - state.dragOffset.y;
+
+        // Apply Snapping
+        const snappedX = Math.round(targetX / SNAP_VAL) * SNAP_VAL;
+        const snappedY = Math.round(targetY / SNAP_VAL) * SNAP_VAL;
+
+        Body.setPosition(state.dragBody, { x: snappedX, y: snappedY });
+        Body.setVelocity(state.dragBody, { x: 0, y: 0 }); // Stop momentum
+    }
 }
 
 function handleInputEnd(x, y) {
-    // No specific end logic needed for click-to-create.
+    state.dragBody = null;
 }
 
-function handleSelection(x, y) {
+function handleSelectionAndDragStart(x, y) {
     const bodies = Query(x, y);
-    // Filter out ground if we don't want to edit it, or allow it.
-    // Let's avoid selecting ground for now as it is huge.
+    // Allow selecting ground? Usually no.
     const found = bodies.find(b => b.label !== 'ground');
 
     if (found) {
         state.selectedBody = found;
+        state.dragBody = found; // Start dragging
+        state.dragOffset = {
+            x: x - found.position.x,
+            y: y - found.position.y
+        };
+
+        // Update UI sliders to match selected body (width/height)
+        // Rectangle body dimensions are not directly stored as width/height properties in Matter.js Bodies
+        // We have to estimate from bounds or area/density, but we stored them at creation? No.
+        // We can approximate from vertices (assuming axis-aligned-ish or just checking bounds width/height)
+        // Or better, let's look at bounds area.
+        // Or simply calculate distance between vertices.
+        // Let's use simple bounds for now (works if not rotated).
+        // If rotated, it's harder.
+        // Let's try to assume standard rectangle vertices order: 0-1 is width or height.
+        const v = found.vertices;
+        const sideA = Vector.magnitude(Vector.sub(v[0], v[1]));
+        const sideB = Vector.magnitude(Vector.sub(v[1], v[2]));
+        // Usually long side is length, short is thickness
+        const len = Math.max(sideA, sideB);
+        const thick = Math.min(sideA, sideB);
+
+        document.getElementById('element-length').value = Math.round(len);
+        document.getElementById('len-val').textContent = Math.round(len);
+        document.getElementById('element-thickness').value = Math.round(thick);
+        document.getElementById('thick-val').textContent = Math.round(thick);
+
         updateStatus(`Seçildi: ${found.label === 'beam' ? 'Kiriş' : found.label === 'column' ? 'Kolon' : 'Temel'}`);
     } else {
         state.selectedBody = null;
@@ -330,7 +433,11 @@ function createStructuralElementClick(x, y, type) {
     // But if they don't collide, they might look weird if not connected?
     // User said "parçalar birbirine çarpınca iç içe geçmeli".
 
-    const body = Bodies.rectangle(x, y, length, thickness, {
+    // Snap creation position
+    const snappedX = Math.round(x / SNAP_VAL) * SNAP_VAL;
+    const snappedY = Math.round(y / SNAP_VAL) * SNAP_VAL;
+
+    const body = Bodies.rectangle(snappedX, snappedY, length, thickness, {
         angle: angle,
         density: material.density,
         friction: material.friction,
@@ -525,6 +632,9 @@ function startSimulation() {
         }
     });
 
+    // Enable mouse interaction during simulation
+    mouseConstraint.collisionFilter.mask = 0xFFFFFFFF;
+
     updateStatus("Simülasyon Başladı: Deprem Uygulanıyor...");
 }
 
@@ -549,6 +659,9 @@ function resetSimulation() {
              body.collisionFilter.mask = 0x0001;
         }
     });
+
+    // Disable mouse interaction (Edit Mode uses custom drag)
+    mouseConstraint.collisionFilter.mask = 0;
 
     // Restore logic:
     // If we have a saved state, we want to restore it.
