@@ -25,7 +25,7 @@ const state = {
     dragOffset: { x: 0, y: 0 }
 };
 
-const SNAP_VAL = 20; // 20px grid snap
+const SNAP_VAL = 5; // 5px grid snap for finer alignment
 
 // Material Properties (Simplified)
 const MATERIALS = {
@@ -161,6 +161,7 @@ document.getElementById('btn-reset').addEventListener('click', resetSimulation);
 document.getElementById('btn-edit').addEventListener('click', () => setMode('edit'));
 document.getElementById('btn-rotate-cw').addEventListener('click', () => rotateSelected(Math.PI / 4));
 document.getElementById('btn-rotate-ccw').addEventListener('click', () => rotateSelected(-Math.PI / 4));
+document.getElementById('btn-reconnect').addEventListener('click', rebuildConnections);
 
 // Sliders
 ['magnitude', 'depth', 'duration'].forEach(id => {
@@ -212,6 +213,9 @@ function updateSelectedBodyDimensions() {
     // We want to keep material density.
     const material = MATERIALS[state.selectedMaterial] || MATERIALS['concrete']; // Fallback
     Body.setDensity(body, material.density);
+
+    // Rebuild connections to update visuals immediately
+    rebuildConnections();
 }
 
 document.getElementById('element-length').addEventListener('input', (e) => {
@@ -260,6 +264,7 @@ function setMode(mode) {
 function rotateSelected(angle) {
     if (state.mode === 'edit' && state.selectedBody) {
         Body.rotate(state.selectedBody, angle);
+        rebuildConnections(); // Update connections after rotation
     }
 }
 
@@ -321,7 +326,10 @@ function handleInputMove(x, y) {
 }
 
 function handleInputEnd(x, y) {
-    state.dragBody = null;
+    if (state.dragBody) {
+        state.dragBody = null;
+        rebuildConnections(); // Update connections after drag ends
+    }
 }
 
 function handleSelectionAndDragStart(x, y) {
@@ -359,9 +367,15 @@ function handleSelectionAndDragStart(x, y) {
         document.getElementById('thick-val').textContent = Math.round(thick);
 
         updateStatus(`Seçildi: ${found.label === 'beam' ? 'Kiriş' : found.label === 'column' ? 'Kolon' : 'Temel'}`);
+
+        // Visual feedback for properties panel
+        document.querySelector('.control-group:nth-child(2)').style.backgroundColor = '#e8f0fe';
     } else {
         state.selectedBody = null;
         updateStatus("Düzenleme Modu: Seçim temizlendi.");
+
+        // Remove feedback
+        document.querySelector('.control-group:nth-child(2)').style.backgroundColor = '';
     }
 }
 
@@ -454,80 +468,11 @@ function createStructuralElementClick(x, y, type) {
 
     Composite.add(world, body);
 
-    if (!isStatic) {
-        // Connect to any intersecting bodies
-        connectIntersections(body);
-    }
+    // Update connections immediately for all bodies
+    rebuildConnections();
 }
 
-function connectIntersections(newBody) {
-    const allBodies = Composite.allBodies(world);
-
-    allBodies.forEach(otherBody => {
-        if (otherBody === newBody) return;
-        if (otherBody.label === 'ground') return;
-
-        // Use SAT to detect overlap
-        const collision = Matter.SAT.collides(newBody, otherBody);
-
-        if (collision.collided) {
-            // Find approximate center of intersection
-            // SAT returns supports (points of contact)
-            // We can average them to find a good pivot point
-            let px = 0, py = 0;
-            if (collision.supports.length > 0) {
-                collision.supports.forEach(p => {
-                    px += p.x;
-                    py += p.y;
-                });
-                px /= collision.supports.length;
-                py /= collision.supports.length;
-            } else {
-                // Fallback to midpoint of bodies if supports missing (rare)
-                px = (newBody.position.x + otherBody.position.x) / 2;
-                py = (newBody.position.y + otherBody.position.y) / 2;
-            }
-
-            // Calculate local offsets
-            const localA = Vector.rotate(Vector.sub({x: px, y: py}, newBody.position), -newBody.angle);
-            const localB = Vector.rotate(Vector.sub({x: px, y: py}, otherBody.position), -otherBody.angle);
-
-            // Initial relative angle for stiffness
-            const initialAngleDiff = newBody.angle - otherBody.angle;
-
-            // Determine joint stiffness and strength based on connected bodies
-            // Use the weaker material property to define the joint's limits
-            let jointStiffness = newBody.stiffness || 50000;
-            if (otherBody.stiffness && otherBody.stiffness < jointStiffness) {
-                jointStiffness = otherBody.stiffness;
-            }
-
-            // Create pivot constraint
-            const constraint = Constraint.create({
-                bodyA: newBody,
-                bodyB: otherBody,
-                pointA: localA,
-                pointB: localB,
-                stiffness: 1, // High stiffness for positional anchor
-                length: 0,
-                render: {
-                    visible: true,
-                    lineWidth: 0, // Hide the line, we will draw a custom joint
-                    strokeStyle: 'transparent',
-                    anchors: false
-                }
-            });
-
-            // Custom properties for bending physics
-            constraint.isStructural = true;
-            constraint.initialAngleDiff = initialAngleDiff;
-            constraint.rotationalStiffness = jointStiffness;
-            constraint.jointColor = '#333'; // Default joint color
-
-            Composite.add(world, constraint);
-        }
-    });
-}
+// connectIntersections removed in favor of rebuildConnections
 
 // Custom renderer for joints
 Events.on(render, 'afterRender', function() {
@@ -591,13 +536,20 @@ function createJoint(x, y) {
 
 function handleDelete(x, y) {
     const bodies = Query(x, y);
+    let removed = false;
     bodies.forEach(body => {
         if (body.label !== 'ground') {
             Composite.remove(world, body);
+            // Constraints are removed by rebuildConnections anyway, but good to be clean
             const constraints = Composite.allConstraints(world).filter(c => c.bodyA === body || c.bodyB === body);
             constraints.forEach(c => Composite.remove(world, c));
+            removed = true;
         }
     });
+
+    if (removed) {
+        rebuildConnections();
+    }
 }
 
 function Query(x, y) {
@@ -635,7 +587,93 @@ function startSimulation() {
     // Enable mouse interaction during simulation
     mouseConstraint.collisionFilter.mask = 0xFFFFFFFF;
 
+    // Recalculate connections based on current positions
+    rebuildConnections();
+
     updateStatus("Simülasyon Başladı: Deprem Uygulanıyor...");
+}
+
+function rebuildConnections() {
+    // Remove existing structural constraints to avoid duplicates or stretched bonds
+    // We keep MouseConstraint and maybe 'Joint' bodies if they are manual?
+    // User requested "calculate intersection points again".
+    // So we assume current overlaps define the new structure.
+
+    const constraints = Composite.allConstraints(world);
+    constraints.forEach(c => {
+        if (c.isStructural) {
+            Composite.remove(world, c);
+        }
+    });
+
+    // Find all structural bodies
+    const bodies = Composite.allBodies(world).filter(b => b.label !== 'ground' && b.label !== 'Rectangle Body');
+
+    // Check pairs for overlap
+    for (let i = 0; i < bodies.length; i++) {
+        for (let j = i + 1; j < bodies.length; j++) {
+            const bodyA = bodies[i];
+            const bodyB = bodies[j];
+
+            // Check overlap
+            const collision = Matter.SAT.collides(bodyA, bodyB);
+            if (collision.collided) {
+                createConnection(bodyA, bodyB, collision);
+            }
+        }
+    }
+}
+
+function createConnection(newBody, otherBody, collision) {
+    // Shared logic extracted from connectIntersections (simplified)
+    // Find approximate center of intersection
+    let px = 0, py = 0;
+    if (collision && collision.supports && collision.supports.length > 0) {
+        collision.supports.forEach(p => {
+            px += p.x;
+            py += p.y;
+        });
+        px /= collision.supports.length;
+        py /= collision.supports.length;
+    } else {
+        px = (newBody.position.x + otherBody.position.x) / 2;
+        py = (newBody.position.y + otherBody.position.y) / 2;
+    }
+
+    // Calculate local offsets
+    const localA = Vector.rotate(Vector.sub({x: px, y: py}, newBody.position), -newBody.angle);
+    const localB = Vector.rotate(Vector.sub({x: px, y: py}, otherBody.position), -otherBody.angle);
+
+    // Initial relative angle for stiffness
+    const initialAngleDiff = newBody.angle - otherBody.angle;
+
+    // Determine joint stiffness
+    let jointStiffness = newBody.stiffness || 50000;
+    if (otherBody.stiffness && otherBody.stiffness < jointStiffness) {
+        jointStiffness = otherBody.stiffness;
+    }
+
+    const constraint = Constraint.create({
+        bodyA: newBody,
+        bodyB: otherBody,
+        pointA: localA,
+        pointB: localB,
+        stiffness: 1,
+        length: 0,
+        render: {
+            visible: true,
+            lineWidth: 0,
+            strokeStyle: 'transparent',
+            anchors: false
+        }
+    });
+
+    constraint.isStructural = true;
+    constraint.initialAngleDiff = initialAngleDiff;
+    constraint.rotationalStiffness = jointStiffness;
+    constraint.jointColor = '#333';
+
+    Composite.add(world, constraint);
 }
 
 function resetSimulation() {
