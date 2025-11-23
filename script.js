@@ -783,6 +783,11 @@ function restoreWorldState() {
         if (c.label !== 'Mouse Constraint') Composite.remove(world, c);
     });
 
+    // Instead of restoring specific constraints, we can also just rebuildConnections()
+    // if the user wants "Edit Mode" state.
+    // However, savedState.constraints might be useful if we support manual joints in future.
+    // For now, let's restore what was saved to be safe.
+
     savedState.constraints.forEach(savedC => {
         const bodyA = savedC.bodyAId ? currentBodies.find(b => b.id === savedC.bodyAId) : null;
         const bodyB = savedC.bodyBId ? currentBodies.find(b => b.id === savedC.bodyBId) : null;
@@ -798,8 +803,25 @@ function restoreWorldState() {
             length: savedC.length,
             render: { visible: true, lineWidth: 3, strokeStyle: '#333' } // Default style
         });
+
+        // Restore custom properties
+        newConstraint.isStructural = true;
+        newConstraint.rotationalStiffness = savedC.stiffness * 50000; // Approx or we should save it
+
         Composite.add(world, newConstraint);
     });
+
+    // Ensure collision filters are reset to Edit Mode (Overlap allowed)
+    // Because startSimulation set them to 0xFFFFFFFF
+    const bodies = Composite.allBodies(world);
+    bodies.forEach(body => {
+        if (body.label !== 'ground') {
+             body.collisionFilter.mask = 0x0001; // Collide only with ground
+        }
+    });
+
+    // Rebuild visual connections just in case
+    rebuildConnections();
 }
 
 
